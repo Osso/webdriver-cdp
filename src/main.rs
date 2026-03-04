@@ -93,13 +93,15 @@ fn parse_connect_args(args: &[String]) -> ConnectArgs {
 
 fn launch_visible_chrome(debug_port: u16) -> Child {
     let bin = std::env::var("CHROME_BIN").unwrap_or_else(|_| "google-chrome-stable".to_string());
+    let data_dir = std::env::temp_dir().join("webdriver-cdp-chrome");
     eprintln!("Launching Chrome from {} on port {}...", bin, debug_port);
     std::process::Command::new(&bin)
         .args([
             &format!("--remote-debugging-port={}", debug_port),
+            &format!("--user-data-dir={}", data_dir.display()),
             "--window-size=1800,1200",
-            "--ignore-certificate-errors",
             "--no-first-run",
+            "--no-default-browser-check",
             "--disable-background-networking",
             "about:blank",
         ])
@@ -161,7 +163,7 @@ async fn run_connect(args: &[String]) {
     );
     eprintln!("Press Ctrl+C to disconnect and close Chrome");
 
-    tokio::signal::ctrl_c().await.ok();
+    shutdown_signal().await;
     disconnect_and_cleanup(&opts.server, &mut chrome).await;
 }
 
