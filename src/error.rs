@@ -18,7 +18,7 @@ pub enum WebDriverError {
     UnknownCommand(String),
     UnknownError(String),
     NoSuchAlert,
-    ElementClickIntercepted,
+    ElementClickIntercepted(String),
     InsecureCertificate,
     MoveTargetOutOfBounds,
 }
@@ -40,7 +40,7 @@ impl WebDriverError {
             Self::UnknownCommand(_) => "unknown command",
             Self::UnknownError(_) => "unknown error",
             Self::NoSuchAlert => "no such alert",
-            Self::ElementClickIntercepted => "element click intercepted",
+            Self::ElementClickIntercepted(_) => "element click intercepted",
             Self::InsecureCertificate => "insecure certificate",
             Self::MoveTargetOutOfBounds => "move target out of bounds",
         }
@@ -62,7 +62,7 @@ impl WebDriverError {
             Self::UnknownCommand(_) => StatusCode::NOT_FOUND,
             Self::UnknownError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::NoSuchAlert => StatusCode::NOT_FOUND,
-            Self::ElementClickIntercepted => StatusCode::BAD_REQUEST,
+            Self::ElementClickIntercepted(_) => StatusCode::BAD_REQUEST,
             Self::InsecureCertificate => StatusCode::BAD_REQUEST,
             Self::MoveTargetOutOfBounds => StatusCode::BAD_REQUEST,
         }
@@ -84,7 +84,7 @@ impl WebDriverError {
             Self::UnknownCommand(m) => m.clone(),
             Self::UnknownError(m) => m.clone(),
             Self::NoSuchAlert => "No alert present".into(),
-            Self::ElementClickIntercepted => "Click intercepted".into(),
+            Self::ElementClickIntercepted(m) => m.clone(),
             Self::InsecureCertificate => "Insecure certificate".into(),
             Self::MoveTargetOutOfBounds => "Move target out of bounds".into(),
         }

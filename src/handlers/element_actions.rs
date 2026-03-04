@@ -20,6 +20,7 @@ pub async fn element_click(
     let x = coords.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let y = coords.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
 
+    check_click_intercept(&session, &element_id, x, y).await?;
     dispatch_click(&session.cdp, x, y).await?;
     Ok(Json(json!({ "value": null })))
 }
@@ -101,6 +102,39 @@ async fn scroll_into_view_and_get_center(
         .and_then(|r| r.get("value"))
         .cloned()
         .ok_or(WebDriverError::ElementNotInteractable)
+}
+
+async fn check_click_intercept(
+    session: &crate::session::Session,
+    element_id: &str,
+    x: f64,
+    y: f64,
+) -> Result<(), WebDriverError> {
+    let js = format!(
+        "function() {{ \
+            const hit = document.elementFromPoint({x}, {y}); \
+            if (!hit) return 'no element at point'; \
+            if (this === hit || this.contains(hit)) return null; \
+            const tag = hit.tagName.toLowerCase(); \
+            const id = hit.id ? '#' + hit.id : ''; \
+            const cls = hit.className && typeof hit.className === 'string' \
+                ? '.' + hit.className.trim().split(/\\s+/).join('.') : ''; \
+            return tag + id + cls; \
+        }}"
+    );
+    let result = session.call_function_on(element_id, &js, vec![], true).await?;
+    let desc = result
+        .get("result")
+        .and_then(|r| r.get("value"))
+        .and_then(|v| v.as_str());
+    if let Some(covering) = desc {
+        let msg = format!(
+            "Element click intercepted: another element <{}> covers the target at ({}, {})",
+            covering, x, y
+        );
+        return Err(WebDriverError::ElementClickIntercepted(msg));
+    }
+    Ok(())
 }
 
 async fn dispatch_click(cdp: &CdpSession, x: f64, y: f64) -> Result<(), WebDriverError> {
