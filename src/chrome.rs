@@ -51,7 +51,11 @@ fn find_chrome_binary() -> String {
         "/Applications/Chromium.app/Contents/MacOS/Chromium",
     ];
     for c in candidates {
-        if Command::new("which")
+        if c.starts_with('/') {
+            if std::path::Path::new(c).exists() {
+                return c.to_string();
+            }
+        } else if Command::new("which")
             .arg(c)
             .output()
             .map(|o| o.status.success())
