@@ -176,7 +176,7 @@ async fn disconnect_and_cleanup(server: &str, chrome: &mut Child) {
 
 // --- router ---
 
-fn build_router(store: SessionStore) -> Router {
+fn webdriver_routes() -> Router<SessionStore> {
     Router::new()
         .merge(status_routes())
         .merge(session_routes())
@@ -191,6 +191,12 @@ fn build_router(store: SessionStore) -> Router {
         .merge(screenshot_routes())
         .merge(alert_routes())
         .merge(action_routes())
+}
+
+fn build_router(store: SessionStore) -> Router {
+    Router::new()
+        .merge(webdriver_routes())
+        .nest("/wd/hub", webdriver_routes())
         .merge(admin_routes())
         .with_state(store)
 }
