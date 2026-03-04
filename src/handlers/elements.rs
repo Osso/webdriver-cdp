@@ -339,13 +339,11 @@ fn build_child_nth_js(using: &str, value: &str, index: u64) -> String {
 
 pub fn extract_object_id(result: &Value) -> Result<String, WebDriverError> {
     if let Some(exception) = result.get("exceptionDetails") {
+        // Prefer exception.description (has actual error) over text (often just "Uncaught")
         let text = exception
-            .get("text")
-            .or_else(|| {
-                exception
-                    .get("exception")
-                    .and_then(|e| e.get("description"))
-            })
+            .get("exception")
+            .and_then(|e| e.get("description"))
+            .or_else(|| exception.get("text"))
             .and_then(|v| v.as_str())
             .unwrap_or("Unknown error");
         if text.contains("no such element") {
