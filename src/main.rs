@@ -114,6 +114,50 @@ fn launch_visible_chrome(debug_port: u16) -> Child {
         })
 }
 
+/// TCP proxy: forwards connections from private IPs to 127.0.0.1:target_port.
+/// Chrome only binds to loopback; this makes it reachable from Docker containers.
+/// Rejects connections from non-private IPs for security.
+async fn spawn_tcp_proxy(listen_port: u16, target_port: u16) {
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", listen_port))
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to bind proxy on port {}: {}", listen_port, e);
+            std::process::exit(1);
+        });
+    eprintln!("TCP proxy 0.0.0.0:{} → 127.0.0.1:{} (private IPs only)", listen_port, target_port);
+    tokio::spawn(async move {
+        loop {
+            if let Ok((inbound, _)) = listener.accept().await {
+                let target = target_port;
+                tokio::spawn(async move {
+                    proxy_connection(inbound, target).await;
+                });
+            }
+        }
+    });
+}
+
+fn is_private_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_private() || v4.is_loopback(),
+        std::net::IpAddr::V6(_) => false,
+    }
+}
+
+async fn proxy_connection(inbound: tokio::net::TcpStream, target_port: u16) {
+    if let Ok(addr) = inbound.peer_addr() {
+        if !is_private_ip(addr.ip()) {
+            return;
+        }
+    }
+    let mut inbound = inbound;
+    let mut outbound = match tokio::net::TcpStream::connect(("127.0.0.1", target_port)).await {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound).await;
+}
+
 async fn wait_for_cdp(debug_port: u16) -> bool {
     let url = format!("http://127.0.0.1:{}/json/version", debug_port);
     for _ in 0..50 {
@@ -125,9 +169,29 @@ async fn wait_for_cdp(debug_port: u16) -> bool {
     false
 }
 
-async fn register_external_chrome(server: &str, debug_port: u16) -> Result<(), String> {
+fn detect_docker_bridge_ip() -> String {
+    if let Ok(output) = std::process::Command::new("ip")
+        .args(["-4", "-o", "addr", "show", "docker0"])
+        .output()
+    {
+        let text = String::from_utf8_lossy(&output.stdout);
+        if let Some(pos) = text.find("inet ") {
+            let rest = &text[pos + 5..];
+            if let Some(slash) = rest.find('/') {
+                let ip = &rest[..slash];
+                if ip.parse::<std::net::IpAddr>().is_ok() {
+                    return ip.to_string();
+                }
+            }
+        }
+    }
+    "172.17.0.1".to_string()
+}
+
+async fn register_external_chrome(server: &str, proxy_port: u16) -> Result<(), String> {
     let url = format!("{}/_admin/chrome", server);
-    let body = serde_json::json!({ "url": format!("http://host.docker.internal:{}", debug_port) });
+    let bridge_ip = detect_docker_bridge_ip();
+    let body = serde_json::json!({ "url": format!("http://{}:{}", bridge_ip, proxy_port) });
     let resp = reqwest::Client::new()
         .post(&url)
         .json(&body)
@@ -152,7 +216,11 @@ async fn run_connect(args: &[String]) {
     }
     eprintln!("Chrome CDP ready");
 
-    if let Err(e) = register_external_chrome(&opts.server, opts.debug_port).await {
+    // Proxy forwards Docker traffic → 127.0.0.1 (Chrome only binds loopback)
+    let proxy_port = opts.debug_port + 1;
+    spawn_tcp_proxy(proxy_port, opts.debug_port).await;
+
+    if let Err(e) = register_external_chrome(&opts.server, proxy_port).await {
         eprintln!("{}", e);
         let _ = chrome.kill();
         std::process::exit(1);
@@ -499,4 +567,24 @@ async fn shutdown_signal() {
         _ = terminate => tracing::info!("SIGTERM received"),
     }
     tracing::info!("Shutting down...");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn private_ips_accepted() {
+        assert!(is_private_ip("172.17.0.1".parse().unwrap()));
+        assert!(is_private_ip("172.21.0.1".parse().unwrap()));
+        assert!(is_private_ip("10.0.0.1".parse().unwrap()));
+        assert!(is_private_ip("192.168.1.1".parse().unwrap()));
+        assert!(is_private_ip("127.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn public_ips_rejected() {
+        assert!(!is_private_ip("8.8.8.8".parse().unwrap()));
+        assert!(!is_private_ip("1.1.1.1".parse().unwrap()));
+    }
 }
