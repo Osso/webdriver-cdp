@@ -174,3 +174,53 @@ pub async fn close_target_on(base_url: &str, target_id: &str) -> Result<()> {
         .context("Failed to close target")?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rewrite_ws_host_replaces_localhost() {
+        let result = rewrite_ws_host(
+            "ws://localhost:9222/devtools/page/ABC",
+            "host.docker.internal:9222",
+        );
+        assert_eq!(result, "ws://host.docker.internal:9222/devtools/page/ABC");
+    }
+
+    #[test]
+    fn rewrite_ws_host_replaces_ip() {
+        let result = rewrite_ws_host(
+            "ws://127.0.0.1:9222/devtools/page/XYZ",
+            "host.docker.internal:5555",
+        );
+        assert_eq!(result, "ws://host.docker.internal:5555/devtools/page/XYZ");
+    }
+
+    #[test]
+    fn rewrite_ws_host_preserves_non_ws() {
+        let result = rewrite_ws_host("http://localhost:9222/foo", "other:1234");
+        assert_eq!(result, "http://localhost:9222/foo");
+    }
+
+    #[test]
+    fn rewrite_ws_host_no_path() {
+        let result = rewrite_ws_host("ws://localhost:9222", "other:1234");
+        assert_eq!(result, "ws://localhost:9222");
+    }
+
+    #[test]
+    fn chrome_args_includes_headless_by_default() {
+        let args = chrome_args(9222);
+        assert!(args.contains(&"--headless=new".to_string()));
+        assert!(args.contains(&"--remote-debugging-port=9222".to_string()));
+        assert!(args.contains(&"--no-sandbox".to_string()));
+        assert!(args.contains(&"--ignore-certificate-errors".to_string()));
+    }
+
+    #[test]
+    fn chrome_args_includes_debug_port() {
+        let args = chrome_args(5555);
+        assert!(args.contains(&"--remote-debugging-port=5555".to_string()));
+    }
+}

@@ -111,3 +111,52 @@ impl std::fmt::Display for WebDriverError {
 }
 
 impl std::error::Error for WebDriverError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_codes_match_w3c_spec() {
+        assert_eq!(
+            WebDriverError::NoSuchElement.error_code(),
+            "no such element"
+        );
+        assert_eq!(
+            WebDriverError::InvalidSessionId.error_code(),
+            "invalid session id"
+        );
+        assert_eq!(WebDriverError::Timeout.error_code(), "timeout");
+        assert_eq!(
+            WebDriverError::StaleElementReference.error_code(),
+            "stale element reference"
+        );
+    }
+
+    #[test]
+    fn http_status_codes_are_correct() {
+        assert_eq!(
+            WebDriverError::NoSuchElement.http_status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            WebDriverError::InvalidArgument("x".into()).http_status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            WebDriverError::SessionNotCreated("x".into()).http_status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            WebDriverError::Timeout.http_status(),
+            StatusCode::REQUEST_TIMEOUT
+        );
+    }
+
+    #[test]
+    fn error_response_has_w3c_structure() {
+        let err = WebDriverError::NoSuchElement;
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+}
