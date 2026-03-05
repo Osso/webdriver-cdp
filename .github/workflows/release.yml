@@ -50,7 +50,7 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build
-        run: ${{ matrix.use_cross && 'cross' || 'cargo' }} build --release --target ${{ matrix.target }}
+        run: ${{ matrix.use_cross && 'cross' || 'cargo' }} build --release --target ${{ matrix.target }} ${{ matrix.use_cross && '--features vendored-openssl' || '' }}
 
       - name: Package (unix)
         if: matrix.archive == 'tar.gz'

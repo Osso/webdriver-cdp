@@ -26,3 +26,7 @@ which = "7"
 chrome-for-testing = "0.2"
 zip-extensions = "0.8"
 directories = "6"
+openssl = { version = "0.10", optional = true, features = ["vendored"] }
+
+[features]
+vendored-openssl = ["openssl"]
