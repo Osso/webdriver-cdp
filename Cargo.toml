@@ -22,3 +22,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 urlencoding = "2"
 uuid = { version = "1", features = ["v4"] }
 futures-util = "0.3"
+which = "7"
+chrome-for-testing = "0.2"
+zip-extensions = "0.8"
+directories = "6"

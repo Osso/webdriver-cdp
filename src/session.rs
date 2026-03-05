@@ -1,6 +1,7 @@
 use crate::cdp::CdpSession;
 use serde_json::Value;
 
+#[allow(dead_code)]
 pub struct Session {
     pub session_id: String,
     pub target_id: String,
@@ -23,6 +24,7 @@ impl Session {
     }
 
     /// Evaluate JS and return the result value.
+    #[allow(dead_code)]
     pub async fn evaluate_js(
         &self,
         expression: &str,

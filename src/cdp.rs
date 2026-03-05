@@ -14,6 +14,7 @@ type PendingMap = Arc<DashMap<i64, oneshot::Sender<Result<Value, String>>>>;
 /// - Reader: Messages with "id" → routed to pending oneshot channels
 ///           Messages with "method" → broadcast to event subscribers
 /// - Writer: Forwards raw JSON strings from the mpsc channel to the WS
+#[allow(dead_code)]
 pub struct CdpSession {
     msg_tx: mpsc::Sender<String>,
     pending: PendingMap,
@@ -149,6 +150,7 @@ impl CdpSession {
     }
 
     /// Subscribe to CDP events.
+    #[allow(dead_code)]
     pub fn subscribe_events(&self) -> broadcast::Receiver<Value> {
         self.event_tx.subscribe()
     }

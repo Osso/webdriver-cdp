@@ -21,6 +21,10 @@ async fn main() {
         run_connect(&args[2..]).await;
         return;
     }
+    if args.len() > 1 && args[1] == "browser-check" {
+        run_browser_check().await;
+        return;
+    }
 
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -43,7 +47,7 @@ async fn run_server() {
         .and_then(|p| p.parse().ok())
         .unwrap_or(9222);
 
-    let chrome = chrome::Chrome::launch(chrome_port).expect("Failed to launch Chrome");
+    let chrome = chrome::Chrome::launch(chrome_port).await.expect("Failed to launch Chrome");
     chrome.wait_ready().await.expect("Chrome CDP not ready");
     let _chrome = Arc::new(chrome);
 
@@ -58,6 +62,36 @@ async fn run_server() {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
+}
+
+// --- browser-check subcommand ---
+
+async fn run_browser_check() {
+    match chrome::find_chrome_binary().await {
+        Ok(bin) => {
+            eprintln!("Chrome binary: {}", bin);
+            let output = std::process::Command::new(&bin)
+                .arg("--version")
+                .output();
+            match output {
+                Ok(o) => {
+                    let version = String::from_utf8_lossy(&o.stdout);
+                    eprint!("Version: {}", version.trim());
+                    if !version.trim().is_empty() {
+                        eprintln!();
+                    } else {
+                        let stderr = String::from_utf8_lossy(&o.stderr);
+                        eprintln!("{}", stderr.trim());
+                    }
+                }
+                Err(e) => eprintln!("Failed to get version: {}", e),
+            }
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    }
 }
 
 // --- connect subcommand ---
@@ -91,8 +125,11 @@ fn parse_connect_args(args: &[String]) -> ConnectArgs {
     ConnectArgs { server, debug_port }
 }
 
-fn launch_visible_chrome(debug_port: u16) -> Child {
-    let bin = std::env::var("CHROME_BIN").unwrap_or_else(|_| "google-chrome-stable".to_string());
+async fn launch_visible_chrome(debug_port: u16) -> Child {
+    let bin = chrome::find_chrome_binary().await.unwrap_or_else(|e| {
+        eprintln!("Failed to find Chrome: {}", e);
+        std::process::exit(1);
+    });
     let data_dir = std::env::temp_dir().join("webdriver-cdp-chrome");
     eprintln!("Launching Chrome from {} on port {}...", bin, debug_port);
     std::process::Command::new(&bin)
@@ -207,7 +244,7 @@ async fn register_external_chrome(server: &str, proxy_port: u16) -> Result<(), S
 
 async fn run_connect(args: &[String]) {
     let opts = parse_connect_args(args);
-    let mut chrome = launch_visible_chrome(opts.debug_port);
+    let mut chrome = launch_visible_chrome(opts.debug_port).await;
 
     if !wait_for_cdp(opts.debug_port).await {
         eprintln!("Chrome CDP not ready after 5s");

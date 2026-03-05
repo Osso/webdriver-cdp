@@ -38,39 +38,152 @@ fn chrome_args(debug_port: u16) -> Vec<String> {
     args
 }
 
-fn find_chrome_binary() -> String {
-    let candidates = [
-        "google-chrome-stable",
-        "google-chrome",
-        "chromium-browser",
-        "chromium",
-        "/usr/bin/google-chrome-stable",
-        "/usr/bin/chromium-browser",
-        "/usr/bin/chromium",
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    ];
-    for c in candidates {
-        if c.starts_with('/') {
-            if std::path::Path::new(c).exists() {
-                return c.to_string();
-            }
-        } else if Command::new("which")
-            .arg(c)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
-            return c.to_string();
+const WHICH_CANDIDATES: &[&str] = &[
+    "google-chrome-stable",
+    "google-chrome",
+    "chromium-browser",
+    "chromium",
+    "chrome",
+];
+
+const ABSOLUTE_CANDIDATES: &[&str] = &[
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+];
+
+fn find_installed_chrome() -> Option<String> {
+    for name in WHICH_CANDIDATES {
+        if which::which(name).is_ok() {
+            return Some(name.to_string());
         }
     }
-    "google-chrome-stable".to_string()
+    for path in ABSOLUTE_CANDIDATES {
+        if std::path::Path::new(path).exists() {
+            return Some(path.to_string());
+        }
+    }
+    None
+}
+
+async fn download_chrome_for_testing() -> Result<String> {
+    use chrome_for_testing::api::channel::Channel;
+    use chrome_for_testing::api::last_known_good_versions::LastKnownGoodVersions;
+    use chrome_for_testing::api::platform::Platform;
+
+    eprintln!("Chrome not found, downloading Chrome for Testing...");
+
+    let platform = Platform::detect().context("Unsupported platform")?;
+    let cache_dir = chrome_cache_dir()?;
+    let client = reqwest::Client::new();
+
+    let versions = LastKnownGoodVersions::fetch(client.clone())
+        .await
+        .context("Failed to fetch Chrome for Testing versions")?;
+
+    let stable = versions
+        .channels
+        .get(&Channel::Stable)
+        .context("No stable Chrome version found")?;
+
+    let download = stable
+        .downloads
+        .chrome
+        .iter()
+        .find(|d| d.platform == platform)
+        .context("No Chrome download for current platform")?;
+
+    let version_str = stable.version.to_string();
+    let chrome_exe = cached_chrome_executable(&cache_dir, &version_str, platform);
+
+    if !chrome_exe.exists() {
+        fetch_and_extract_chrome(&client, &download.url, &cache_dir, &version_str).await?;
+        set_executable(&chrome_exe)?;
+    }
+
+    Ok(chrome_exe.to_string_lossy().into_owned())
+}
+
+fn chrome_cache_dir() -> Result<std::path::PathBuf> {
+    let base = directories::BaseDirs::new().context("Could not determine home directory")?;
+    Ok(base.cache_dir().join("webdriver-cdp").join("chrome-for-testing"))
+}
+
+fn cached_chrome_executable(
+    cache_dir: &std::path::Path,
+    version: &str,
+    platform: chrome_for_testing::api::platform::Platform,
+) -> std::path::PathBuf {
+    let unpack_dir = cache_dir.join(version).join(format!("chrome-{}", platform));
+    match platform {
+        chrome_for_testing::api::platform::Platform::Linux64
+        | chrome_for_testing::api::platform::Platform::MacX64 => unpack_dir.join("chrome"),
+        chrome_for_testing::api::platform::Platform::MacArm64 => unpack_dir
+            .join("Google Chrome for Testing.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("Google Chrome for Testing"),
+        chrome_for_testing::api::platform::Platform::Win32
+        | chrome_for_testing::api::platform::Platform::Win64 => unpack_dir.join("chrome.exe"),
+    }
+}
+
+async fn fetch_and_extract_chrome(
+    client: &reqwest::Client,
+    url: &str,
+    cache_dir: &std::path::Path,
+    version: &str,
+) -> Result<()> {
+    let dest = cache_dir.join(version);
+    std::fs::create_dir_all(&dest).context("Failed to create Chrome cache directory")?;
+
+    eprintln!("Downloading Chrome for Testing {}...", version);
+    let bytes = client
+        .get(url)
+        .send()
+        .await
+        .context("Failed to download Chrome zip")?
+        .bytes()
+        .await
+        .context("Failed to read Chrome zip bytes")?;
+
+    let tmp = dest.join("chrome.zip");
+    std::fs::write(&tmp, &bytes).context("Failed to write Chrome zip")?;
+
+    zip_extensions::zip_extract(&tmp, &dest).context("Failed to extract Chrome zip")?;
+    std::fs::remove_file(&tmp).ok();
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_executable(path: &std::path::Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    if path.exists() {
+        let mut perms = std::fs::metadata(path)?.permissions();
+        perms.set_mode(perms.mode() | 0o111);
+        std::fs::set_permissions(path, perms)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_executable(_path: &std::path::Path) -> Result<()> {
+    Ok(())
+}
+
+pub async fn find_chrome_binary() -> Result<String> {
+    if let Ok(bin) = std::env::var("CHROME_BIN") {
+        return Ok(bin);
+    }
+    if let Some(bin) = find_installed_chrome() {
+        return Ok(bin);
+    }
+    download_chrome_for_testing().await
 }
 
 impl Chrome {
     /// Launch Chrome with CDP enabled.
-    pub fn launch(debug_port: u16) -> Result<Self> {
-        let chrome_bin = std::env::var("CHROME_BIN").unwrap_or_else(|_| find_chrome_binary());
+    pub async fn launch(debug_port: u16) -> Result<Self> {
+        let chrome_bin = find_chrome_binary().await?;
 
         info!(
             "Launching Chrome from {} on port {}",
@@ -91,6 +204,7 @@ impl Chrome {
         })
     }
 
+    #[allow(dead_code)]
     pub fn debug_port(&self) -> u16 {
         self.debug_port
     }
