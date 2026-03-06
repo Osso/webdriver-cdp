@@ -15,12 +15,14 @@ fn is_headless() -> bool {
 }
 
 fn chrome_args(debug_port: u16) -> Vec<String> {
+    let data_dir = std::env::temp_dir().join("webdriver-cdp-chrome");
     let mut args = Vec::new();
     if is_headless() {
         args.push("--headless=new".into());
     }
     args.extend([
         format!("--remote-debugging-port={}", debug_port),
+        format!("--user-data-dir={}", data_dir.display()),
         "--no-sandbox".into(),
         "--disable-gpu".into(),
         "--disable-dev-shm-usage".into(),
@@ -30,6 +32,7 @@ fn chrome_args(debug_port: u16) -> Vec<String> {
         "--disable-translate".into(),
         "--metrics-recording-only".into(),
         "--no-first-run".into(),
+        "--no-default-browser-check".into(),
         "--safebrowsing-disable-auto-update".into(),
         "--ignore-certificate-errors".into(),
         "--window-size=1800,1200".into(),
